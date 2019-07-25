@@ -1,0 +1,231 @@
+ CREATE DATABASE SalaEspera
+ GO
+ 
+ USE SalaEspera
+ GO
+ 
+ CREATE TABLE Persona
+ (
+ 	personaID INT IDENTITY PRIMARY KEY,
+ 	idPersona NVARCHAR(20),
+ 	nombre NVARCHAR(50)
+ )
+ GO
+ 
+ CREATE TABLE Cola
+ (
+ 	colaID INT IDENTITY PRIMARY KEY,
+ 	nombre NVARCHAR(20),
+ 	minutosTiempoEspera INT,
+ 	numero INT 
+ )
+ GO
+ 
+ CREATE TABLE PersonaCola
+(
+	PersonaColaID INT IDENTITY PRIMARY KEY,
+	colaID INT,
+	personaID INT,
+	estadoAtencion BIT,
+	horaOut TIME,
+	numeroAtencion INT NOT NULL
+)
+GO
+
+ALTER TABLE PersonaCola
+ADD CONSTRAINT fk_PersonaCola_cola
+FOREIGN KEY (colaID) REFERENCES Cola
+GO
+
+ALTER TABLE PersonaCola
+ADD CONSTRAINT fk_PersonaCola_persona
+FOREIGN KEY (personaID) REFERENCES Persona
+GO
+
+INSERT INTO Cola
+(
+	nombre,
+	minutosTiempoEspera,
+	numero
+)
+VALUES
+(
+	'Cola 1',
+	2,
+	1
+),
+(
+	'Cola 2',
+	3,
+	2
+)
+GO
+
+
+
+
+------- procedimientos almacenados ---------
+
+CREATE PROC SP_GUARDARNUEVOTURNO
+@name NVARCHAR(50),
+@id NVARCHAR(20)
+AS
+BEGIN
+	
+	BEGIN TRY
+		BEGIN TRANSACTION
+		
+		DECLARE @idPersona INT
+		DECLARE @idCola INT
+		DECLARE @timeColaUno TIME
+		DECLARE @timeColaDos TIME
+		DECLARE @numeroAtencion INT
+		DECLARE @timeColaOut TIME
+		
+		
+		UPDATE pc
+		SET pc.estadoAtencion = 0
+		FROM PersonaCola AS pc
+		WHERE pc.horaOut <= cast(getdate() as time)
+		
+		SELECT TOP 1 @timeColaUno =ISNULL(pc.horaOut, GETDATE()) FROM PersonaCola AS pc
+		JOIN Cola AS c ON c.colaID = pc.colaID
+		WHERE c.numero = 1 AND pc.estadoAtencion = 1
+		ORDER BY pc.PersonaColaID DESC 
+		
+		SELECT TOP 1 @timeColaDos = ISNULL(pc.horaOut, GETDATE()) FROM PersonaCola AS pc
+		JOIN Cola AS c ON c.colaID = pc.colaID
+		WHERE c.numero = 2 AND pc.estadoAtencion = 1
+		ORDER BY pc.PersonaColaID DESC  
+		
+		SELECT TOP 1 @numeroAtencion = pc.numeroAtencion FROM PersonaCola AS pc
+		ORDER BY pc.PersonaColaID DESC
+		
+		IF @numeroAtencion IS NULL
+		BEGIN
+			SET @numeroAtencion = 1
+		END
+		ELSE
+			BEGIN
+				SET @numeroAtencion = @numeroAtencion + 1
+			END
+		
+		
+		IF  @timeColaUno IS NULL AND @timeColaDos IS NULL
+		BEGIN
+			
+			SET @idCola = 1
+		    SET @timeColaOut = DATEADD(MINUTE, 2, GETDATE())
+			
+		END
+		
+		ELSE IF @timeColaUno IS NOT NULL AND @timeColaDos IS NULL 
+		     BEGIN
+		     	
+		     	IF	DATEADD(minute,2, @timeColaUno) < DATEADD(minute,3, cast(getdate() as time) )
+		     	BEGIN
+		     		SET @idCola = 1
+		     		SET @timeColaOut = DATEADD(minute,2, @timeColaUno)
+		     	END
+		     	ELSE IF DATEADD(minute,2, @timeColaUno) > DATEADD(minute,3, cast(getdate() as time)) 
+		     	BEGIN
+		     		SET @idCola = 2
+		     		SET @timeColaOut = DATEADD(minute,3, cast(getdate() as time))
+		     	END
+			
+		     END
+		     
+		     ELSE IF @timeColaUno IS NULL AND @timeColaDos IS NOT NULL 
+		     	BEGIN
+		     		
+		     		SET @idCola = 1
+		     		SET @timeColaOut = DATEADD(MINUTE, 2, GETDATE())
+			
+		     	END
+		     	
+		     	ELSE IF @timeColaUno IS NOT NULL AND @timeColaDos IS NOT NULL
+		     	BEGIN
+		     		
+		     		IF	DATEADD(minute,2, @timeColaUno) < DATEADD(minute,3, @timeColaDos )
+		     		BEGIN
+		     			SET @idCola = 1
+		     			SET @timeColaOut = DATEADD(minute,2, @timeColaUno)
+		     		END
+		     		ELSE IF DATEADD(minute,2, @timeColaUno) > DATEADD(minute,3, @timeColaDos) 
+		     		BEGIN
+		     			SET @idCola = 2
+		     			SET @timeColaOut = DATEADD(minute,3, @timeColaDos)
+		     		END
+					
+		     	END
+		     	
+		     	INSERT INTO Persona
+						(
+							idPersona,
+							nombre
+						)
+						VALUES
+						(
+							@id,
+							@name
+						)
+						SELECT @idPersona = @@IDENTITY
+
+						INSERT INTO PersonaCola
+						(
+							colaID,
+							personaID,
+							estadoAtencion,
+							horaOut,
+							numeroAtencion
+						)
+						VALUES
+						(
+							@idCola,
+							@idPersona,
+							1,
+							@timeColaOut,
+							@numeroAtencion
+						)
+		
+		
+		SELECT pc.numeroAtencion, c.numero FROM PersonaCola AS pc
+		JOIN Cola AS c ON c.colaID = pc.colaID
+		WHERE pc.estadoAtencion = 1
+		
+		COMMIT;
+	END TRY
+	BEGIN CATCH
+		/* 
+			SELECT
+				ERROR_NUMBER() AS ErrorNumber,
+				ERROR_SEVERITY() AS ErrorSeverity,
+				ERROR_STATE() AS ErrorState,
+				ERROR_PROCEDURE() AS ErrorProcedure,
+				ERROR_LINE() AS ErrorLine,
+				ERROR_MESSAGE() AS ErrorMessage
+		*/
+		ROLLBACK;
+	END CATCH
+END
+GO
+       	
+       ------- sp para data inicial -----	
+       	CREATE PROC SP_GETDATA
+       	@name NVARCHAR(50) = NULL,
+		@id NVARCHAR(20) = NULL
+       	AS
+       	
+       	BEGIN
+       		UPDATE pc
+			SET pc.estadoAtencion = 0
+			FROM PersonaCola AS pc
+			WHERE pc.horaOut <= cast(getdate() as time)
+			
+			
+			SELECT pc.numeroAtencion, c.colaID FROM PersonaCola AS pc
+			JOIN Cola AS c ON c.colaID = pc.colaID
+			WHERE pc.estadoAtencion = 1
+				
+       	END
+       	GO
