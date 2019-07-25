@@ -11,6 +11,5 @@ namespace jganchozo.salaespera.entity
         public int ColaID { get; set; }
  	    public string  Nombre { get; set; }
         public int MinutosTiempoEspera { get; set; }
-
     }
 }
